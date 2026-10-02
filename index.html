@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Решатель уравнений</title>
+
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Библиотека для решения уравнений в браузере -->
+    <script src="https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/nerdamer.core.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/Algebra.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/Calculus.js"></script>
+</head>
+
+<body>
+
+<main class="app">
+    <section class="calculator">
+
+        <div class="header">
+            <div class="logo">∑</div>
+
+            <div>
+                <h1>Решатель уравнений</h1>
+                <p>Введите уравнение и найдите значение неизвестной</p>
+            </div>
+        </div>
+
+        <form id="equation-form">
+
+            <label for="equation">Уравнение</label>
+
+            <div class="input-wrapper">
+                <input
+                    type="text"
+                    id="equation"
+                    placeholder="Например: 2x + 5 = 15"
+                    autocomplete="off"
+                    required
+                >
+
+                <button type="button" class="clear-button" id="clear-button">
+                    ×
+                </button>
+            </div>
+
+            <div class="examples">
+                <span>Примеры:</span>
+
+                <button type="button" class="example-button">
+                    2x + 5 = 15
+                </button>
+
+                <button type="button" class="example-button">
+                    x^2 - 9 = 0
+                </button>
+
+                <button type="button" class="example-button">
+                    3*(x + 2) = 18
+                </button>
+            </div>
+
+            <label for="symbol">Искомый символ</label>
+
+            <input
+                type="text"
+                id="symbol"
+                maxlength="1"
+                value="x"
+                placeholder="x"
+            >
+
+            <button type="submit" class="solve-button">
+                <span>Решить уравнение</span>
+                <span class="arrow">→</span>
+            </button>
+        </form>
+
+        <section class="result-card" id="result-card">
+            <div class="result-header">
+                <span class="result-icon">✓</span>
+                <span>Результат</span>
+            </div>
+
+            <div id="result">
+                Здесь появится решение уравнения
+            </div>
+        </section>
+
+        <div class="footer">
+            Работает полностью в браузере через GitHub Pages
+        </div>
+
+    </section>
+</main>
+
+<script>
+    const form = document.getElementById("equation-form");
+    const equationInput = document.getElementById("equation");
+    const symbolInput = document.getElementById("symbol");
+    const resultCard = document.getElementById("result-card");
+    const result = document.getElementById("result");
+    const clearButton = document.getElementById("clear-button");
+    const exampleButtons = document.querySelectorAll(".example-button");
+
+    clearButton.addEventListener("click", () => {
+        equationInput.value = "";
+        symbolInput.value = "x";
+
+        result.textContent = "Здесь появится решение уравнения";
+        resultCard.classList.remove("success", "error");
+
+        equationInput.focus();
+    });
+
+    exampleButtons.forEach(button => {
+        button.addEventListener("click", () => {
+            equationInput.value = button.textContent.trim();
+            equationInput.focus();
+        });
+    });
+
+    form.addEventListener("submit", event => {
+        event.preventDefault();
+
+        const equation = equationInput.value.trim();
+        const symbol = symbolInput.value.trim() || "x";
+
+        if (!equation) {
+            showError("Введите уравнение");
+            return;
+        }
+
+        if (!/^[a-zA-Zа-яА-Я]$/.test(symbol)) {
+            showError("Искомый символ должен состоять из одной буквы");
+            return;
+        }
+
+        try {
+            const solutions = solveEquation(equation, symbol);
+
+            resultCard.classList.remove("error");
+            resultCard.classList.add("success");
+
+            if (solutions.length === 0) {
+                result.textContent = "Уравнение не имеет решений";
+                return;
+            }
+
+            result.innerHTML = solutions
+                .map(solution => `
+                    <div class="solution">
+                        <span class="solution-symbol">${escapeHtml(symbol)}</span>
+                        <span>=</span>
+                        <span>${escapeHtml(solution)}</span>
+                    </div>
+                `)
+                .join("");
+
+        } catch (error) {
+            showError("Не удалось распознать уравнение");
+            console.error(error);
+        }
+    });
+
+    function solveEquation(equation, symbol) {
+        let normalized = normalizeEquation(equation);
+
+        if (!normalized.includes("=")) {
+            throw new Error("Неверный формат уравнения");
+        }
+
+        const parts = normalized.split("=");
+
+        if (parts.length !== 2) {
+            throw new Error("Уравнение должно содержать один знак =");
+        }
+
+        const leftSide = parts[0].trim();
+        const rightSide = parts[1].trim();
+
+        const equationForNerdamer = `${leftSide} - (${rightSide})`;
+
+        const answer = nerdamer.solveFor(equationForNerdamer, symbol);
+        const textAnswers = answer.text("LaTeX");
+
+        if (!textAnswers) {
+            return [];
+        }
+
+        return formatSolutions(textAnswers);
+    }
+
+    function normalizeEquation(equation) {
+        let normalized = equation
+            .replaceAll(" ", "")
+            .replaceAll("−", "-")
+            .replaceAll("²", "^2")
+            .replaceAll("³", "^3")
+            .replaceAll(",", ".");
+
+        /*
+         * Превращает:
+         * 2x      → 2*x
+         * 3(x+1)  → 3*(x+1)
+         * (x+1)x   → (x+1)*x
+         */
+        normalized = normalized
+            .replace(/(\d)([a-zA-Zа-яА-Я])/g, "$1*$2")
+            .replace(/([a-zA-Zа-яА-Я])(\d)/g, "$1*$2")
+            .replace(/([a-zA-Zа-яА-Я])([a-zA-Zа-яА-Я])/g, "$1*$2")
+            .replace(/(\d)\(/g, "$1*(")
+            .replace(/([a-zA-Zа-яА-Я])\(/g, "$1*(")
+            .replace(/\)(\d)/g, ")*$1")
+            .replace(/\)([a-zA-Zа-яА-Я])/g, ")*$1");
+
+        return normalized;
+    }
+
+    function formatSolutions(solutionText) {
+        let solutions = solutionText
+            .split(",")
+            .map(solution => solution.trim())
+            .filter(Boolean);
+
+        return solutions.map(solution => {
+            return solution
+                .replaceAll("\\cdot", "·")
+                .replaceAll("\\frac", "frac")
+                .replaceAll("{", "")
+                .replaceAll("}", "")
+                .replaceAll("\\sqrt", "√")
+                .replaceAll("^", "ⁿ");
+        });
+    }
+
+    function showError(message) {
+        resultCard.classList.remove("success");
+        resultCard.classList.add("error");
+        result.textContent = message;
+    }
+
+    function escapeHtml(value) {
+        return value
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+    }
+</script>
+
+</body>
+</html>
