@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Решатель уравнений</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/12.0.0/math.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -142,6 +142,7 @@
 
         .emoji {
             font-size: 20px;
+            flex-shrink: 0;
         }
 
         .solution {
@@ -199,7 +200,7 @@
             <input 
                 type="text" 
                 id="equation" 
-                placeholder="влевая_часть = правая_часть"
+                placeholder="левая_часть = правая_часть"
                 autocomplete="off"
             >
         </div>
@@ -226,6 +227,7 @@
         const goodEmojis = [':)', ':]', '<3', '∆_∆', ':P', ':>', 'XD'];
         const badEmojis = [':(', ':[', ':<', '-_-', '._.', ':#', ':l'];
         let lastEmoji = '';
+        let solveInProgress = false;
 
         function getRandomEmoji(mood) {
             const list = mood === 'good' ? goodEmojis : badEmojis;
@@ -238,29 +240,44 @@
         }
 
         function normalize(equation) {
-            // Добавляем * между цифрой и буквой
-            equation = equation.replace(/(\d)(?!\*)([a-яА-Яa-zA-Z])/g, '$1*$2');
-            // Добавляем * между буквой и буквой
-            equation = equation.replace(/([a-яА-Яa-zA-Z])(?!\*)([a-яА-Яa-zA-Z])/g, '$1*$2');
-            // Добавляем * между цифрой/буквой и (
-            equation = equation.replace(/(\d)(?!\*)\(/g, '$1*(');
-            equation = equation.replace(/([a-яА-Яa-zA-Z])(?!\*)\(/g, '$1*(');
-            // Добавляем * между ) и цифрой/буквой
-            equation = equation.replace(/\)(?!\*)(\d)/g, ')*$1');
-            equation = equation.replace(/\)(?!\*)([a-яА-Яa-zA-Z])/g, ')*$1');
             // Заменяем ^ на **
             equation = equation.replace(/\^/g, '**');
+            
+            // Добавляем * между:
+            // 1) цифрой и буквой (2x -> 2*x)
+            equation = equation.replace(/(\d)([a-яА-Яa-zA-Z])/g, '$1*$2');
+            
+            // 2) буквой и цифрой (x2 -> x*2)
+            equation = equation.replace(/([a-яА-Яa-zA-Z])(\d)/g, '$1*$2');
+            
+            // 3) цифрой/буквой и открывающей скобкой (2( -> 2*( или x( -> x*()
+            equation = equation.replace(/(\d)\(/g, '$1*(');
+            equation = equation.replace(/([a-яА-Яa-zA-Z])\(/g, '$1*(');
+            
+            // 4) закрывающей скобкой и цифрой/буквой ()2 -> )*2 или )x -> )*x)
+            equation = equation.replace(/\)(\d)/g, ')*$1');
+            equation = equation.replace(/\)([a-яА-Яa-zA-Z])/g, ')*$1');
+            
+            // 5) буквой и буквой (xy -> x*y)
+            equation = equation.replace(/([a-яА-Яa-zA-Z])([a-яА-Яa-zA-Z])/g, '$1*$2');
             
             return equation;
         }
 
-        function getUniqueSymbols(equation) {
-            const symbolPattern = /[a-яА-Яa-zA-Z]/g;
-            const matches = equation.match(symbolPattern) || [];
-            return [...new Set(matches)].sort();
+        function extractSymbols(equation) {
+            // Извлекаем все уникальные буквы (одиночные переменные, не части многобуквенного слова)
+            const symbols = new Set();
+            const pattern = /[a-яА-Яa-zA-Z]/g;
+            let match;
+            while ((match = pattern.exec(equation)) !== null) {
+                symbols.add(match[0]);
+            }
+            return Array.from(symbols).sort();
         }
 
         function solveEquation() {
+            if (solveInProgress) return;
+            
             const output = document.getElementById('output');
             output.innerHTML = '';
 
@@ -276,19 +293,19 @@
                 return;
             }
 
-            const uniqueSymbols = getUniqueSymbols(equationStr);
+            const symbols = extractSymbols(equationStr);
 
-            if (uniqueSymbols.length === 0) {
+            if (symbols.length === 0) {
                 showMessage('В уравнении не найдены переменные!', 'error', output);
                 return;
             }
 
-            if (uniqueSymbols.length > 1) {
-                showSymbolSelector(uniqueSymbols, output);
+            if (symbols.length > 1) {
+                showSymbolSelector(symbols, output);
                 return;
             }
 
-            const symbol = uniqueSymbols[0];
+            const symbol = symbols[0];
             solveForSymbol(equationStr, symbol, output);
         }
 
@@ -298,9 +315,7 @@
             symbolSelect.innerHTML = symbols.map(s => `<option value="${s}">${s}</option>`).join('');
             selector.classList.add('active');
 
-            const originalContent = output.innerHTML;
             showMessage(`Найдено несколько переменных: ${symbols.join(', ')}. Выберите искомую переменную.`, 'info', output);
-            output.innerHTML = originalContent + output.innerHTML;
 
             symbolSelect.onchange = () => {
                 const symbol = symbolSelect.value;
@@ -311,81 +326,131 @@
         }
 
         function solveForSymbol(equationStr, symbol, output) {
+            if (solveInProgress) return;
+            solveInProgress = true;
+
             try {
                 const match = equationStr.match(/(.*?)\s*=\s*(.*)/);
-                const leftStr = normalize(match[1]);
-                const rightStr = normalize(match[2]);
+                const leftStr = match[1];
+                const rightStr = match[2];
 
-                // Используем math.js для решения
-                const expr = `${leftStr} - (${rightStr})`;
-                const solutions = [];
+                // Нормализуем выражения
+                const leftNorm = normalize(leftStr);
+                const rightNorm = normalize(rightStr);
 
-                // Простые случаи для линейных уравнений
+                // Создаём выражение для решения
+                const expr = `(${leftNorm}) - (${rightNorm})`;
+
+                // Проверяем валидность выражения
                 try {
-                    const node = math.parse(expr);
-                    const compiled = node.compile();
+                    math.parse(expr);
+                } catch (e) {
+                    showMessage(`Синтаксическая ошибка в выражении: ${e.message}`, 'error', output);
+                    solveInProgress = false;
+                    return;
+                }
 
-                    // Метод подбора для нелинейных уравнений
-                    for (let x = -1000; x <= 1000; x += 0.1) {
-                        const result = compiled.evaluate({ [symbol]: x });
-                        if (Math.abs(result) < 0.001) {
-                            const roundedX = Math.round(x * 1000) / 1000;
-                            if (!solutions.some(s => Math.abs(s - roundedX) < 0.01)) {
-                                solutions.push(roundedX);
-                            }
-                        }
-                    }
+                // Пытаемся решить символически (для линейных и простых уравнений)
+                try {
+                    const symbolObj = math.parse(symbol);
+                    const exprObj = math.parse(expr);
+                    
+                    // math.js не имеет встроенного solve, используем численные методы
+                    const solutions = numericalSolve(expr, symbol);
 
                     if (solutions.length === 0) {
-                        // Попробуем symbolab-подобный подход
-                        showMessage('Решение не найдено в диапазоне [-1000, 1000]', 'error', output);
-                        return;
+                        showMessage('Уравнение не имеет решений', 'error', output);
+                    } else {
+                        showMessage('✓ Решения уравнения', 'success', output);
+                        solutions.forEach(sol => {
+                            const solutionDiv = document.createElement('div');
+                            solutionDiv.className = 'solution';
+                            // Форматируем число
+                            const formatted = formatNumber(sol);
+                            solutionDiv.textContent = `${symbol} = ${formatted}`;
+                            output.appendChild(solutionDiv);
+                        });
                     }
-
-                    showMessage('✓ Решения уравнения', 'success', output);
-                    solutions.forEach(sol => {
-                        const solutionDiv = document.createElement('div');
-                        solutionDiv.className = 'solution';
-                        solutionDiv.textContent = `${symbol} = ${sol}`;
-                        output.appendChild(solutionDiv);
-                    });
-
                 } catch (e) {
                     showMessage(`Ошибка при вычислении: ${e.message}`, 'error', output);
                 }
 
             } catch (error) {
                 showMessage(`Ошибка: ${error.message}`, 'error', output);
+            } finally {
+                solveInProgress = false;
             }
         }
 
-        function showMessage(text, type, output) {
-            const message = document.createElement('div');
-            message.className = `message ${type}`;
-            const emoji = type === 'error' ? getRandomEmoji('bad') : getRandomEmoji('good');
-            message.innerHTML = `<span class="emoji">${emoji}</span><span>${text}</span>`;
-            output.appendChild(message);
-        }
+        function numericalSolve(expression, symbol) {
+            const solutions = [];
+            const compiled = math.compile(expression);
+            
+            // Расширяем диапазон поиска
+            const ranges = [
+                { min: -1e10, max: 1e10, step: 1e8 },
+                { min: -1e6, max: 1e6, step: 1e4 },
+                { min: -1e3, max: 1e3, step: 1 },
+                { min: -1, max: 1, step: 0.001 }
+            ];
 
-        function clearAll() {
-            document.getElementById('equation').value = '';
-            document.getElementById('output').innerHTML = '';
-            document.getElementById('symbolSelector').classList.remove('active');
-            document.getElementById('equation').focus();
-        }
-
-        // Позволяем решать по Enter
-        document.getElementById('equation').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') solveEquation();
-        });
-
-        document.getElementById('symbol').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                const symbol = document.getElementById('symbol').value;
-                const equationStr = document.getElementById('equation').value;
-                solveForSymbol(equationStr, symbol, document.getElementById('output'));
+            for (const range of ranges) {
+                for (let x = range.min; x <= range.max; x += range.step) {
+                    try {
+                        const result = compiled.evaluate({ [symbol]: x });
+                        if (typeof result === 'number' && Math.abs(result) < 1e-6) {
+                            // Проверяем, нет ли уже похожего решения
+                            const isDuplicate = solutions.some(s => Math.abs(s - x) < 0.01);
+                            if (!isDuplicate) {
+                                solutions.push(x);
+                            }
+                        }
+                    } catch (e) {
+                        // Пропускаем ошибки вычисления
+                    }
+                }
+                
+                // Если уже нашли решения, уточняем их
+                if (solutions.length > 0) break;
             }
-        });
-    </script>
-</body>
-</html>
+
+            // Уточняем решения методом Ньютона-Рафсона
+            const refined = [];
+            for (let sol of solutions) {
+                const refined_sol = newtonRaphson(compiled, symbol, sol);
+                refined.push(refined_sol);
+            }
+
+            return refined.sort((a, b) => a - b);
+        }
+
+        function newtonRaphson(compiled, symbol, initial, maxIter = 10) {
+            let x = initial;
+            const h = 1e-5;
+
+            for (let i = 0; i < maxIter; i++) {
+                try {
+                    const f = compiled.evaluate({ [symbol]: x });
+                    const f_h = compiled.evaluate({ [symbol]: x + h });
+                    const df = (f_h - f) / h;
+
+                    if (Math.abs(df) < 1e-10) break;
+
+                    const x_new = x - f / df;
+                    if (Math.abs(x_new - x) < 1e-9) break;
+
+                    x = x_new;
+                } catch (e) {
+                    break;
+                }
+            }
+
+            return x;
+        }
+
+        function formatNumber(num) {
+            if (Math.abs(num) < 1e-10) return '0';
+            if (Number.isInteger(num)) return num.toString();
+            
+            // Проверяем, не простая ли дробь
+            for (let denom = 1; denom <= 1000; denom++) {
